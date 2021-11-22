@@ -9,7 +9,7 @@
 ## Dependencies
 
 ```
-mamba create -n lusc -c conda-forge -c pytorch -c bioconda pypgatk pytorch torchvision torchaudio cpuonly lifelines statsmodels pandas scikit-learn seaborn fire biopython scipy ipykernel
+mamba create -n lusc -c conda-forge -c pytorch -c bioconda pypgatk pytorch torchvision torchaudio cpuonly lifelines statsmodels pandas scikit-learn seaborn fire biopython scipy tqdm ipykernel ipywidgets
 conda activate lusc
 python -m ipykernel install --user --name=lusc
 conda deactivate
