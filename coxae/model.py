@@ -1,6 +1,7 @@
 import numpy as np
-import sklearn
-import lifelines
+
+from sklearn.cluster import KMeans
+from sklearn.exceptions import NotFittedError
 
 import torch
 import torch.nn as nn
@@ -9,8 +10,9 @@ import pycox
 
 from .base import SurvivalClustererMixin
 from .architectures import CoxAutoencoder
+from .significant_factor_selection import get_significant_factors
 
-__DEFAULT_AE_KWARGS = {
+_DEFAULT_AE_KWARGS = {
     "hidden_dims": [512],
     "encoding_dim": 128,
     "cox_hidden_dims": [],
@@ -20,12 +22,12 @@ __DEFAULT_AE_KWARGS = {
     "bias": True,
 }
 
-__DEFAULT_AE_OPT_KWARGS = {
+_DEFAULT_AE_OPT_KWARGS = {
     "lr":1e-3,
     "weight_decay": 1e-4
 }
 
-__DEFAULT_AE_TRAIN_KWARGS = {
+_DEFAULT_AE_TRAIN_KWARGS = {
     "epochs":256,
     "noise_std": 0.2
 }
@@ -34,13 +36,13 @@ class CoxAutoencoderClustering(SurvivalClustererMixin):
 
     def __init__(self,
             *args,
-            n_clusters=2,
             d_in:int = None,
-            ae_kwargs:dict = __DEFAULT_AE_KWARGS,
-            ae_opt_kwargs = __DEFAULT_AE_OPT_KWARGS,
-            ae_train_opts = __DEFAULT_AE_TRAIN_KWARGS,
+            ae_kwargs:dict = _DEFAULT_AE_KWARGS,
+            ae_opt_kwargs = _DEFAULT_AE_OPT_KWARGS,
+            ae_train_kwargs = _DEFAULT_AE_TRAIN_KWARGS,
+            clusterer = KMeans(2),
             **kwargs):
-        super().__init__(*args, n_clusters=n_clusters, **kwargs)
+        super().__init__(*args, **kwargs)
         
         self.ae_kwargs = ae_kwargs
         if d_in is not None:
@@ -50,13 +52,19 @@ class CoxAutoencoderClustering(SurvivalClustererMixin):
             self.ae_initialised = False
 
         self.ae_opt_kwargs = ae_opt_kwargs
-        if self.ae_opt_kwargs is not None:
+        if self.ae_initialised and self.ae_opt_kwargs is not None:
             self.__init_ae_opt(**ae_opt_kwargs)
             self.ae_opt_initialised = True
         else:
             self.ae_opt_initialised = False
         
-        self.ae_train_opts = ae_train_opts
+        self.ae_train_opts = ae_train_kwargs
+
+        if not hasattr(clusterer, "fit") or not hasattr(clusterer, "predict"):
+            raise ValueError('Only clusterers with separate "fit" and "predict" methods should be used by this class')
+        self.clusterer = clusterer
+
+        self.fitted = False
 
     # Mixin functions
 
@@ -64,26 +72,33 @@ class CoxAutoencoderClustering(SurvivalClustererMixin):
         if not self.ae_initialised:
             self.__init_ae(X.shape[-1], **self.ae_kwargs)
         if not self.ae_opt_initialised:
-            self.ae_opt_kwargs = self.ae_opt_kwargs if ae_opt_kwargs is not None else ae_opt_kwargs
+            self.ae_opt_kwargs = self.ae_opt_kwargs if ae_opt_kwargs is None else ae_opt_kwargs
             self.__init_ae_opt(**self.ae_opt_kwargs)
-        self.ae_train_opts = self.ae_train_opts if ae_train_opts is not None else ae_train_opts
+        self.ae_train_opts = self.ae_train_opts if ae_train_opts is None else ae_train_opts
         self.__train_ae(X, durations, events, *args, **self.ae_train_opts)
-        raise NotImplementedError()
+        integrated_values = self.__integrate_ae(X)
+        self.significant_indexes, self.significant_indexes_p_values = get_significant_factors(integrated_values, durations, events)
+        significant_factors = integrated_values[:,self.significant_indexes]
+        self.clusterer.fit(significant_factors)
+        self.fitted = True
     
     def predict(self, X: np.array, *args, **kwargs):
-        raise NotImplementedError()
-
+        self.check_fitted()
+        integrated_values = self.__integrate_ae(X)
+        significant_factors = integrated_values[:,self.significant_indexes]
+        clusters = self.clusterer.predict(significant_factors)
+        return clusters
 
     # AE-related functions
 
     def __init_ae(self, input_dim:int,
-                hidden_dims:list = __DEFAULT_AE_KWARGS["hidden_dims"],
-                encoding_dim:int = __DEFAULT_AE_KWARGS["encoding_dim"],
-                cox_hidden_dims:list = __DEFAULT_AE_KWARGS["cox_hidden_dims"],
-                nonlinearity:function = __DEFAULT_AE_KWARGS["nonlinearity"],
-                final_nonlinearity:function = __DEFAULT_AE_KWARGS["final_nonlinearity"],
-                dropout_rate:float = __DEFAULT_AE_KWARGS["dropout_rate"],
-                bias:bool = __DEFAULT_AE_KWARGS["bias"],
+                hidden_dims:list = _DEFAULT_AE_KWARGS["hidden_dims"],
+                encoding_dim:int = _DEFAULT_AE_KWARGS["encoding_dim"],
+                cox_hidden_dims:list = _DEFAULT_AE_KWARGS["cox_hidden_dims"],
+                nonlinearity:callable = _DEFAULT_AE_KWARGS["nonlinearity"],
+                final_nonlinearity:callable = _DEFAULT_AE_KWARGS["final_nonlinearity"],
+                dropout_rate:float = _DEFAULT_AE_KWARGS["dropout_rate"],
+                bias:bool = _DEFAULT_AE_KWARGS["bias"],
                 **kwargs) -> None:
         self.ae = CoxAutoencoder(
             input_dim = input_dim,
@@ -97,7 +112,7 @@ class CoxAutoencoderClustering(SurvivalClustererMixin):
             **kwargs
         )
 
-    def __init_ae_opt(self, lr=__DEFAULT_AE_OPT_KWARGS["lr"], weight_decay=__DEFAULT_AE_OPT_KWARGS["weight_decay"], **kwargs) -> None:
+    def __init_ae_opt(self, lr=_DEFAULT_AE_OPT_KWARGS["lr"], weight_decay=_DEFAULT_AE_OPT_KWARGS["weight_decay"], **kwargs) -> None:
         self.opt = torch.optim.Adam(
             self.ae.parameters(),
             lr=lr,
@@ -105,7 +120,7 @@ class CoxAutoencoderClustering(SurvivalClustererMixin):
             **kwargs
         )
     
-    def __train_ae(self, X: np.array, durations: np.array, events: np.array, *args, epochs=__DEFAULT_AE_TRAIN_KWARGS["epochs"], noise_std=__DEFAULT_AE_TRAIN_KWARGS["noise_std"], **kwargs) -> None:
+    def __train_ae(self, X: np.array, durations: np.array, events: np.array, *args, epochs=_DEFAULT_AE_TRAIN_KWARGS["epochs"], noise_std=_DEFAULT_AE_TRAIN_KWARGS["noise_std"], **kwargs) -> None:
         
         tX_clean = torch.tensor(X, dtype=torch.float32)
         tT = torch.tensor(durations, dtype=torch.float32)
@@ -131,10 +146,14 @@ class CoxAutoencoderClustering(SurvivalClustererMixin):
 
             losses.append(loss.detach().numpy().item())
 
-    def integrate_ae(self,X):
+    def __integrate_ae(self,X):
         self.ae.eval()
         return self.ae.encode(torch.tensor(X, dtype=torch.float32)).detach().numpy()
 
-    # Cox-Selection related inputs
-    def get_significant_factors_indexes(self, x):
-        raise NotImplementedError()
+    def integrate_ae(self,X):
+        self.check_fitted()
+        return self.integrate_ae(X)
+    
+    def check_fitted(self):
+        if not self.fitted:
+            raise NotFittedError("This {name} instance is not fitted yet. Call 'fit' with appropriate arguments before using this estimator.".format(name=type(self).__name__))
