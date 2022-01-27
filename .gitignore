@@ -3,6 +3,12 @@
 *.tsv
 *.np
 *.pt
+*.zip
+*.7z
+*.tar
+*.gz
+*.tar.gz
+data/**/*
 backups/
 
 # Byte-compiled / optimized / DLL files
