@@ -1,3 +1,10 @@
+# Data files
+*.csv
+*.tsv
+*.np
+*.pt
+backups/
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
