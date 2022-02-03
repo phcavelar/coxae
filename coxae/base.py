@@ -45,6 +45,12 @@ class SurvivalClustererMixin:
         )
         return test_results.test_statistic, test_results.p_value
 
+class HazardPredictorMixin:
+    __NOTIMPLEMENTED_MESSAGE = "HazardPredictorMixin is a Mix-in class and should implement the calculate_hazard method. See the documentation on the HazardPredictorMixin class for more information."
+
+    def calculate_hazard(self,X:np.array) -> np.array:
+        raise NotImplementedError(HazardPredictorMixin.__NOTIMPLEMENTED_MESSAGE)
+
     def concordance_index(self, hazards:np.array, durations:np.array, events:np.array):
         """Calculates the concordance index on pre-calculated hazard values.
         See https://lifelines.readthedocs.io/en/latest/lifelines.utils.html?highlight=concordance_index#lifelines.utils.concordance_index for more information.

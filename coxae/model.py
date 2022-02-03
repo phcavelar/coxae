@@ -8,7 +8,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import pycox
 
-from .base import SurvivalClustererMixin
+from .base import SurvivalClustererMixin, HazardPredictorMixin
 from .architectures import CoxAutoencoder
 from .significant_factor_selection import get_significant_factors
 
@@ -32,7 +32,7 @@ _DEFAULT_AE_TRAIN_KWARGS = {
     "noise_std": 0.2
 }
 
-class CoxAutoencoderClustering(SurvivalClustererMixin):
+class CoxAutoencoderClustering(SurvivalClustererMixin,HazardPredictorMixin):
 
     def __init__(self,
             *args,
@@ -146,13 +146,13 @@ class CoxAutoencoderClustering(SurvivalClustererMixin):
 
             losses.append(loss.detach().numpy().item())
 
-    def __integrate_ae(self,X):
+    def __integrate(self,X):
         self.ae.eval()
         return self.ae.encode(torch.tensor(X, dtype=torch.float32)).detach().numpy()
 
-    def integrate_ae(self,X):
+    def integrate(self,X):
         self.check_fitted()
-        return self.__integrate_ae(X)
+        return self.__integrate(X)
 
     def __calculate_hazard(self,X):
         self.ae.eval()
