@@ -33,8 +33,8 @@ class SurvivalClustererMixin:
         raise NotImplementedError(SurvivalClustererMixin.__NOTIMPLEMENTED_MESSAGE)
 
     def logrank_p_score(self, clusters:np.array, durations:np.array, events:np.array, t_0:float=-1, weightings:str=None):
-        """Runs the clustering on the input to classify the subgroups and perform a log-rank test.
-        See more at https://lifelines.readthedocs.io/en/latest/lifelines.statistics.html?highlight=statistics#lifelines.statistics.logrank_test and https://lifelines.readthedocs.io/en/latest/lifelines.statistics.html?highlight=statistics#lifelines.statistics.multivariate_logrank_test for more information.
+        """Performs a log-rank test based on pre-calculated subgroups.
+        See https://lifelines.readthedocs.io/en/latest/lifelines.statistics.html?highlight=statistics#lifelines.statistics.logrank_test and https://lifelines.readthedocs.io/en/latest/lifelines.statistics.html?highlight=statistics#lifelines.statistics.multivariate_logrank_test for more information.
         """
         test_results = lifelines.statistics.multivariate_logrank_test(
             durations,
@@ -44,3 +44,9 @@ class SurvivalClustererMixin:
             weightings
         )
         return test_results.test_statistic, test_results.p_value
+
+    def concordance_index(self, hazards:np.array, durations:np.array, events:np.array):
+        """Calculates the concordance index on pre-calculated hazard values.
+        See https://lifelines.readthedocs.io/en/latest/lifelines.utils.html?highlight=concordance_index#lifelines.utils.concordance_index for more information.
+        """
+        return lifelines.utils.concordance_index(durations, -hazards, events)

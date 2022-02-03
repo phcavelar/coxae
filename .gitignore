@@ -11,6 +11,10 @@
 data/**/*
 backups/
 
+# Other libraries
+maui/*
+simdeep/*
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]

@@ -152,7 +152,15 @@ class CoxAutoencoderClustering(SurvivalClustererMixin):
 
     def integrate_ae(self,X):
         self.check_fitted()
-        return self.integrate_ae(X)
+        return self.__integrate_ae(X)
+
+    def __calculate_hazard(self,X):
+        self.ae.eval()
+        return np.exp(self.ae.cox(torch.tensor(X, dtype=torch.float32)).detach().numpy())
+
+    def calculate_hazard(self,X):
+        self.check_fitted()
+        return self.__calculate_hazard(X)
     
     def check_fitted(self):
         if not self.fitted:
