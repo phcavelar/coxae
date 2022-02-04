@@ -10,6 +10,7 @@ from .base import SurvivalClustererMixin, HazardPredictorMixin
 from .significant_factor_selection import get_significant_factors
 
 import warnings
+
 try:
     import maui
     import maui.utils
@@ -128,8 +129,6 @@ try:
                 raise NotFittedError("This {name} instance is not fitted yet. Call 'fit' with appropriate arguments before using this estimator.".format(name=type(self).__name__))
     
 except ImportError as e:
-    raise e
     warnings.warn("Failed to import the maui library! Maui baseline model not built! {}".format(e))
 except Exception as e:
-    raise e
     warnings.warn("Failed to build the maui baseline model! {}".format(e))

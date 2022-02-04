@@ -10,7 +10,8 @@ import pycox
 
 from .base import SurvivalClustererMixin, HazardPredictorMixin
 from .architectures import CoxAutoencoder
-from .significant_factor_selection import get_significant_factors
+from .significant_factor_selection import get_significant_factors, get_most_significant_factor_combinations
+from .utils import time_limited_execution, TimeoutException
 
 _DEFAULT_AE_KWARGS = {
     "hidden_dims": [512],
@@ -40,10 +41,17 @@ class CoxAutoencoderClustering(SurvivalClustererMixin,HazardPredictorMixin):
             ae_kwargs:dict = _DEFAULT_AE_KWARGS,
             ae_opt_kwargs = _DEFAULT_AE_OPT_KWARGS,
             ae_train_kwargs = _DEFAULT_AE_TRAIN_KWARGS,
+            only_significant:bool = True,
+            limit_significant:int = -1,
+            get_most_significant_combination_time_limit:float = 0.0,
             clusterer = KMeans(2),
             **kwargs):
         super().__init__(*args, **kwargs)
         
+        self.only_significant = only_significant
+        self.limit_significant = limit_significant
+        self.get_most_significant_combination_time_limit = get_most_significant_combination_time_limit
+
         self.ae_kwargs = ae_kwargs
         if d_in is not None:
             self.__init_ae(d_in, **ae_kwargs)
@@ -76,15 +84,28 @@ class CoxAutoencoderClustering(SurvivalClustererMixin,HazardPredictorMixin):
             self.__init_ae_opt(**self.ae_opt_kwargs)
         self.ae_train_opts = self.ae_train_opts if ae_train_opts is None else ae_train_opts
         self.__train_ae(X, durations, events, *args, **self.ae_train_opts)
-        integrated_values = self.__integrate_ae(X)
-        self.significant_indexes, self.significant_indexes_p_values = get_significant_factors(integrated_values, durations, events)
+        integrated_values = self.__integrate(X)
+        if self.only_significant:
+            self.significant_indexes, self.significant_indexes_p_values = get_significant_factors(integrated_values, durations, events)
+            ordering = np.argsort(self.significant_indexes_p_values).tolist()
+            self.significant_indexes = [self.significant_indexes[i] for i in ordering[:self.limit_significant]]
+            self.significant_indexes_p_values = [self.significant_indexes_p_values[i] for i in ordering[:self.limit_significant]]
+            if self.get_most_significant_combination_time_limit > 0:
+                significant_indexes_combinations, significant_indexes_combinations_p_values = get_most_significant_factor_combinations(integrated_values, durations, events, self.significant_indexes, time_limit=self.self.get_most_significant_combination_time_limit)
+                combination_ordering = np.argsort(significant_indexes_combinations_p_values).tolist()
+                best_combination = significant_indexes_combinations[combination_ordering[0]]
+                self.significant_indexes_p_values = [self.significant_indexes_p_values[i] for i in self.significant_indexes if i in best_combination]
+                self.significant_indexes = best_combination
+            self.significant_indexes = [i for i in range(integrated_values.shape[1])] if self.significant_indexes == [] else self.significant_indexes
+        else:
+            self.significant_indexes = [i for i in range(integrated_values.shape[1])]
         significant_factors = integrated_values[:,self.significant_indexes]
         self.clusterer.fit(significant_factors)
         self.fitted = True
     
     def predict(self, X: np.array, *args, **kwargs):
         self.check_fitted()
-        integrated_values = self.__integrate_ae(X)
+        integrated_values = self.__integrate(X)
         significant_factors = integrated_values[:,self.significant_indexes]
         clusters = self.clusterer.predict(significant_factors)
         return clusters

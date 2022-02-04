@@ -56,8 +56,6 @@ def get_most_significant_factor_combinations(integrated_values, duration, observ
     # significant Cox-PH model was built (log-rank P < 0.05)
     combinations_significant_factor_indexes = [[i] for i in significant_factor_indexes]
     number_of_significant_factors = len(significant_factor_indexes)
-    minimum_logging_interval = 100
-    last_log = 0
     try:
         with time_limited_execution(time_limit):
             # Iterate over all factors/features of the actual dataframe
@@ -82,11 +80,6 @@ def get_most_significant_factor_combinations(integrated_values, duration, observ
                     if (log_rank_p_value<significance_threshold):
                         combinations_significant_factor_indexes.append(factor_indexes)
                         combinations_logRank_Pvalues.append(log_rank_p_value)
-                    if (log_rank_p_value<significance_threshold or last_log > minimum_logging_interval):
-                        last_log = 0
-                        print(log_rank_p_value, factor_indexes)
-                    else:
-                        last_log
     except KeyboardInterrupt:
         if not allow_keyboard_interrupt:
             raise
