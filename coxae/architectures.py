@@ -85,7 +85,6 @@ class Autoencoder(nn.Module):
             input_dim,
             hidden_dims,
             encoding_dim,
-            cox_hidden_dims,
             nonlinearity=F.relu,
             final_nonlinearity=lambda x:x,
             dropout_rate=0.5,
