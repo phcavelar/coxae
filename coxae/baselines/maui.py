@@ -6,8 +6,8 @@ from sklearn.exceptions import NotFittedError
 
 import lifelines
 
-from .base import SurvivalClustererMixin, HazardPredictorMixin
-from .significant_factor_selection import get_significant_factors
+from ..base import SurvivalClustererMixin, HazardPredictorMixin
+from ..significant_factor_selection import get_significant_factors
 
 import warnings
 
@@ -74,6 +74,8 @@ try:
                 self.significant_factors = [
                     i for i in range(self.maui_model.n_latent) if cph_p_values[i] < self.significance_alpha
                 ]
+                # Add a guard in case no factors are found to be significant
+                self.significant_factors = list(range(self.maui_model.n_latent)) if len(self.significant_factors) == 0 else self.significant_factors
             else:
                 self.significant_factors = [
                     i for i in range(self.maui_model.n_latent)
@@ -112,11 +114,13 @@ try:
 
         def __calculate_hazard(self,X):
             z = self.__integrate(X)
-            return self.cox_ph_model.predict_log_partial_hazard(
-                pd.DataFrame(
-                    {
-                        **{i: z[:, i] for i in self.significant_factors},
-                    }
+            return np.exp(
+                    self.cox_ph_model.predict_log_partial_hazard(
+                    pd.DataFrame(
+                        {
+                            **{i: z[:, i] for i in self.significant_factors},
+                        }
+                    )
                 )
             )
 

@@ -96,6 +96,7 @@ class CoxAutoencoderClustering(SurvivalClustererMixin,HazardPredictorMixin):
                 best_combination = significant_indexes_combinations[combination_ordering[0]]
                 self.significant_indexes_p_values = [self.significant_indexes_p_values[i] for i in self.significant_indexes if i in best_combination]
                 self.significant_indexes = best_combination
+            # Add a guard in case no factors are found to be significant
             self.significant_indexes = [i for i in range(integrated_values.shape[1])] if self.significant_indexes == [] else self.significant_indexes
         else:
             self.significant_indexes = [i for i in range(integrated_values.shape[1])]
