@@ -4,14 +4,12 @@ from sklearn.cluster import KMeans
 from sklearn.exceptions import NotFittedError
 
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
 import pycox
 
 from .base import SurvivalClustererMixin, HazardPredictorMixin
 from .architectures import CoxAutoencoder
 from .significant_factor_selection import get_significant_factors, get_most_significant_factor_combinations
-from .utils import time_limited_execution, TimeoutException
 
 _DEFAULT_AE_KWARGS = {
     "hidden_dims": [512],
