@@ -1,9 +1,11 @@
 import itertools
 
 import numpy as np
+from scipy.linalg import LinAlgError
 import pandas as pd
 
 import lifelines
+from lifelines.exceptions import ConvergenceError
 
 from .utils import TimeoutException, time_limited_execution
 
@@ -23,15 +25,21 @@ def get_significant_factors(integrated_values, duration, observed, significance_
             {
                 "duration": duration,
                 "observed": observed,
-                "Factor_{}".format(i): integrated_values[:,i]
+                "Factor_{}".format(i): integrated_values[:,i],
             }
         )
         # Build univariate COX-PH models
-        cox_ph = lifelines.fitters.coxph_fitter.CoxPHFitter().fit(factor_df, "duration", "observed")
-        log_rank_p_value = cox_ph.summary["p"].mean()
-        if (log_rank_p_value<significance_threshold):
-            significant_factor_indexes.append(i)
-            logRank_Pvalues.append(log_rank_p_value)
+        try:
+            cox_ph = lifelines.fitters.coxph_fitter.CoxPHFitter().fit(factor_df, "duration", "observed")
+            log_rank_p_value = cox_ph.summary["p"].mean()
+            if (log_rank_p_value<significance_threshold):
+                significant_factor_indexes.append(i)
+                logRank_Pvalues.append(log_rank_p_value)
+        except ConvergenceError as e:
+            if isinstance(e.original_exception, str) and e.original_exception.startswith("Matrix is singular"):
+                # Ignore this Factor
+                pass
+
 
     return significant_factor_indexes, logRank_Pvalues
 
@@ -70,7 +78,7 @@ def get_most_significant_factor_combinations(integrated_values, duration, observ
                             **{
                                 "Factor_{}".format(i): integrated_values[:,i]
                                 for i in factor_indexes
-                            }
+                            },
 
                         }
                     )

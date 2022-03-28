@@ -1,6 +1,9 @@
 import signal
 import contextlib
+import math
 
+import numpy as np
+import scipy.stats
 import pandas as pd
 import lifelines
 
@@ -39,3 +42,12 @@ def get_kmfs(subgroups, durations, events):
         grouped_samples.append(samples)
         kmfs.append(kmf)
     return kmfs, grouped_samples
+
+def variance_score(X, y=None):
+    return np.var(X, axis=0)
+
+def mad_score(X, y=None):
+    return scipy.stats.median_absolute_deviation(X, axis=0)
+
+def calculate_concrete_alpha_decay(start_temp, min_temp, num_epochs, steps_per_epoch=1):
+    return math.exp(math.log(min_temp / start_temp) / (num_epochs * steps_per_epoch))

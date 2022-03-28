@@ -1,4 +1,4 @@
-from ast import Import
+from typing import Union
 import pandas as pd
 import numpy as np
 import scipy as sp
@@ -11,7 +11,14 @@ except ImportError:
 
 from sklearn.preprocessing import scale
 
-def remove_constant_columns(df):    
+
+def stack_dicts(X:dict[str,np.ndarray]) -> np.ndarray:
+    return np.concatenate([X[k] for k in X], axis=1)
+
+def preprocess_input_to_dict(X:Union[np.ndarray,dict[str,np.ndarray]]) -> dict[str,np.ndarray]:
+    return {"all": X} if not isinstance(X, dict) else X
+
+def remove_constant_columns(df):
     columns_to_remove = get_constant_columns(df)
     return df.drop(columns=columns_to_remove)
 

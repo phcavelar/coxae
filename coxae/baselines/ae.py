@@ -1,3 +1,6 @@
+from copy import deepcopy
+from typing import Union
+
 import numpy as np
 import pandas as pd
 
@@ -9,48 +12,38 @@ import lifelines
 import torch
 import torch.nn.functional as F
 
-from ..base import SurvivalClustererMixin, HazardPredictorMixin
+from ..base import SurvivalClustererMixin, HazardRegressorMixin
 from ..architectures import Autoencoder
 from ..significant_factor_selection import get_significant_factors, get_most_significant_factor_combinations
+from ..defaults import _DEFAULT_AE_KWARGS, _DEFAULT_AE_OPT_KWARGS, _DEFAULT_AE_TRAIN_KWARGS, _DEFAULT_CLUSTERER, _DEFAULT_SCALER, _DEFAULT_INPUT_FEATURE_SELECTOR, _DEFAULT_ENCODING_FEATURE_SELECTOR, _DEFAULT_COXREGRESSOR
+from ..preprocessing import preprocess_input_to_dict, stack_dicts
 
-_DEFAULT_AE_KWARGS = {
-    "hidden_dims": [512],
-    "encoding_dim": 128,
-    "nonlinearity": F.relu,
-    "final_nonlinearity": lambda x:x,
-    "dropout_rate": 0.3,
-    "bias": True,
-}
-
-_DEFAULT_AE_OPT_KWARGS = {
-    "lr":1e-3,
-    "weight_decay": 1e-4
-}
-
-_DEFAULT_AE_TRAIN_KWARGS = {
-    "epochs":256,
-    "noise_std": 0.2
-}
-
-class AutoencoderClustering(SurvivalClustererMixin,HazardPredictorMixin):
+class AutoencoderClustering(SurvivalClustererMixin,HazardRegressorMixin):
 
     def __init__(self,
             *args,
             d_in:int = None,
-            ae_kwargs:dict = _DEFAULT_AE_KWARGS,
-            ae_opt_kwargs = _DEFAULT_AE_OPT_KWARGS,
-            ae_train_kwargs = _DEFAULT_AE_TRAIN_KWARGS,
-            only_significant:bool = True,
-            limit_significant:int = -1,
-            get_most_significant_combination_time_limit:float = 0.0,
-            clusterer = KMeans(2),
+            ae_kwargs:dict = None,
+            ae_opt_kwargs:dict = None,
+            ae_train_kwargs:dict = None,
+            clusterer = None,
+            scaler = None,
+            input_feature_selector = None,
+            encoding_feature_selector = None,
+            cox_regressor = None,
             **kwargs):
         super().__init__(*args, **kwargs)
+        # Avoiding mutable default values
+        ae_kwargs = _DEFAULT_AE_KWARGS if ae_kwargs is None else ae_kwargs
+        ae_opt_kwargs = _DEFAULT_AE_OPT_KWARGS if ae_opt_kwargs is None else ae_opt_kwargs
+        ae_train_kwargs = _DEFAULT_AE_TRAIN_KWARGS if ae_train_kwargs is None else ae_train_kwargs
+        clusterer = _DEFAULT_CLUSTERER if clusterer is None else clusterer
+        scaler = _DEFAULT_SCALER if scaler is None else scaler
+        input_feature_selector = _DEFAULT_INPUT_FEATURE_SELECTOR if input_feature_selector is None else input_feature_selector
+        encoding_feature_selector = _DEFAULT_ENCODING_FEATURE_SELECTOR if encoding_feature_selector is None else encoding_feature_selector
+        cox_regressor = _DEFAULT_COXREGRESSOR if cox_regressor is None else cox_regressor
         
-        self.only_significant = only_significant
-        self.limit_significant = limit_significant
-        self.get_most_significant_combination_time_limit = get_most_significant_combination_time_limit
-
+        # Initialisation
         self.ae_kwargs = ae_kwargs
         if d_in is not None:
             self.__init_ae(d_in, **ae_kwargs)
@@ -73,53 +66,58 @@ class AutoencoderClustering(SurvivalClustererMixin,HazardPredictorMixin):
 
         self.fitted = False
 
-    # Mixin functions
+        self.scaler = scaler
+        self.scalers = {}
+        self.input_feature_selector = input_feature_selector
+        self.input_feature_selectors = {}
+        self.encoding_feature_selector = encoding_feature_selector
+        self.cox_regressor = cox_regressor
 
-    def fit(self, X: np.array, durations: np.array, events: np.array, *args, ae_opt_kwargs=None, ae_train_opts=None, **kwargs):
+    # Mixin functions
+    
+    def __fit_dict_steps(self, X:dict[str,np.ndarray]) -> None:
+        self.scalers = {k:deepcopy(self.scaler) for k in X}
+        self.input_feature_selectors = {k:deepcopy(self.input_feature_selector) for k in X}
+
+    def fit(self, X: Union[np.ndarray,dict[str,np.ndarray]], durations: np.ndarray, events: np.ndarray, *args, ae_opt_kwargs=None, ae_train_opts=None, **kwargs):
+        X = preprocess_input_to_dict(X)
+        self.__fit_dict_steps(X)
+        X = {k:self.scalers[k].fit_transform(X[k]) for k in self.scalers}
+        X = {k:self.input_feature_selectors[k].fit_transform(X[k], durations, events) for k in self.input_feature_selectors}
+        X = stack_dicts(X)
+        
         if not self.ae_initialised:
             self.__init_ae(X.shape[-1], **self.ae_kwargs)
         if not self.ae_opt_initialised:
             self.ae_opt_kwargs = self.ae_opt_kwargs if ae_opt_kwargs is None else ae_opt_kwargs
             self.__init_ae_opt(**self.ae_opt_kwargs)
-        self.ae_train_opts = self.ae_train_opts if ae_train_opts is None else ae_train_opts
+
         self.__train_ae(X, durations, events, *args, **self.ae_train_opts)
         integrated_values = self.__integrate(X)
-        if self.only_significant:
-            self.significant_indexes, self.significant_indexes_p_values = get_significant_factors(integrated_values, durations, events)
-            ordering = np.argsort(self.significant_indexes_p_values).tolist()
-            self.significant_indexes = [self.significant_indexes[i] for i in ordering[:self.limit_significant]]
-            self.significant_indexes_p_values = [self.significant_indexes_p_values[i] for i in ordering[:self.limit_significant]]
-            if self.get_most_significant_combination_time_limit > 0:
-                significant_indexes_combinations, significant_indexes_combinations_p_values = get_most_significant_factor_combinations(integrated_values, durations, events, self.significant_indexes, time_limit=self.self.get_most_significant_combination_time_limit)
-                combination_ordering = np.argsort(significant_indexes_combinations_p_values).tolist()
-                best_combination = significant_indexes_combinations[combination_ordering[0]]
-                self.significant_indexes_p_values = [self.significant_indexes_p_values[i] for i in self.significant_indexes if i in best_combination]
-                self.significant_indexes = best_combination
-            # Add a guard in case no factors are found to be significant
-            self.significant_indexes = [i for i in range(integrated_values.shape[1])] if self.significant_indexes == [] else self.significant_indexes
-        else:
-            self.significant_indexes = [i for i in range(integrated_values.shape[1])]
-        significant_factors = integrated_values[:,self.significant_indexes]
-        self.cox_ph_model = lifelines.CoxPHFitter().fit(
-            pd.DataFrame(
-                {
-                    **{i: integrated_values[:, i] for i in self.significant_indexes},
-                    "durations": durations,
-                    "events": events,
-                }
-            ),
-            "durations",
-            "events"
-        )
+        self.encoding_feature_selector.fit(integrated_values, durations, events)
+        significant_factors = self.encoding_feature_selector.transform(integrated_values)
+        self.cox_regressor.fit(significant_factors, durations, events)
         self.clusterer.fit(significant_factors)
         self.fitted = True
-    
-    def predict(self, X: np.array, *args, **kwargs):
+        return self
+
+    def integrate(self, X:Union[np.ndarray,dict[str,np.ndarray]], durations:np.ndarray=None, events:np.ndarray=None, *args, **kwargs) -> np.ndarray:
         self.check_fitted()
-        integrated_values = self.__integrate(X)
-        significant_factors = integrated_values[:,self.significant_indexes]
-        clusters = self.clusterer.predict(significant_factors)
-        return clusters
+        X = preprocess_input_to_dict(X)
+        scaled_X = {k:self.scalers[k].transform(X[k]) for k in self.scalers}
+        selected_X = {k:self.input_feature_selectors[k].transform(scaled_X[k], durations, events) for k in self.input_feature_selectors}
+        stacked_X = stack_dicts(selected_X)
+        integrated_values = self.__integrate(stacked_X)
+        significant_factors = self.encoding_feature_selector.transform(integrated_values)
+        return significant_factors
+    
+    def hazard(self, X:Union[np.ndarray,dict[str,np.ndarray]], durations:np.ndarray=None, events:np.ndarray=None, *args, **kwargs) -> np.ndarray:
+        significant_factors = self.integrate(X, durations=durations, events=events, *args, **kwargs)
+        return self.cox_regressor.hazard(significant_factors)
+    
+    def cluster(self, X:Union[np.ndarray,dict[str,np.ndarray]], durations:np.ndarray=None, events:np.ndarray=None, *args, **kwargs) -> np.ndarray:
+        significant_factors = self.integrate(X, durations=durations, events=events, *args, **kwargs)
+        return self.clusterer.predict(significant_factors)
 
     # AE-related functions
 
@@ -150,7 +148,7 @@ class AutoencoderClustering(SurvivalClustererMixin,HazardPredictorMixin):
             **kwargs
         )
     
-    def __train_ae(self, X: np.array, durations: np.array, events: np.array, *args, epochs=_DEFAULT_AE_TRAIN_KWARGS["epochs"], noise_std=_DEFAULT_AE_TRAIN_KWARGS["noise_std"], **kwargs) -> None:
+    def __train_ae(self, X:np.ndarray, durations:np.ndarray, events:np.ndarray, *args, epochs=_DEFAULT_AE_TRAIN_KWARGS["epochs"], noise_std=_DEFAULT_AE_TRAIN_KWARGS["noise_std"], **kwargs) -> None:
         
         tX_clean = torch.tensor(X, dtype=torch.float32)
 
@@ -175,26 +173,6 @@ class AutoencoderClustering(SurvivalClustererMixin,HazardPredictorMixin):
     def __integrate(self,X):
         self.ae.eval()
         return self.ae.encode(torch.tensor(X, dtype=torch.float32)).detach().numpy()
-
-    def integrate(self,X):
-        self.check_fitted()
-        return self.__integrate(X)
-
-    def __calculate_hazard(self,X):
-        self.ae.eval()
-        integrated_values = self.__integrate(X)
-        return np.exp(
-            self.cox_ph_model.predict_log_partial_hazard(
-                pd.DataFrame(
-                    {
-                        **{i: integrated_values[:, i] for i in self.significant_indexes},
-                    }
-                )
-            )
-        )
-    def calculate_hazard(self,X):
-        self.check_fitted()
-        return self.__calculate_hazard(X)
     
     def check_fitted(self):
         if not self.fitted:

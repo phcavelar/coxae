@@ -1,13 +1,18 @@
+from copy import deepcopy
+from typing import Union
+
 import numpy as np
 import pandas as pd
 
 from sklearn.cluster import KMeans
 from sklearn.exceptions import NotFittedError
 
-import lifelines
+import lifelines, lifelines.exceptions
 
-from ..base import SurvivalClustererMixin, HazardPredictorMixin
+from ..base import SurvivalClustererMixin, HazardRegressorMixin
+from ..defaults import _DEFAULT_SCALER, _DEFAULT_INPUT_FEATURE_SELECTOR, _DEFAULT_CLUSTERER, _DEFAULT_COXREGRESSOR, _DEFAULT_PENALISED_COXREGRESSOR
 from ..significant_factor_selection import get_significant_factors
+from ..preprocessing import preprocess_input_to_dict, stack_dicts
 
 import warnings
 
@@ -25,17 +30,26 @@ try:
         "all": lambda x: pd.DataFrame(x[:,:].T)
     }
 
-    class MauiClustering(SurvivalClustererMixin,HazardPredictorMixin):
+    class MauiClustering(SurvivalClustererMixin,HazardRegressorMixin):
 
         def __init__(self,
                 *args,
-                maui_kwargs:dict = _DEFAULT_MAUI_KWARGS,
-                maui_omics_layer_mappings:dict =_DEFAULT_MAUI_MAPPINGS,
-                clusterer = KMeans(2),
+                maui_kwargs:dict = None,
+                maui_omics_layer_mappings:dict = None,
+                scaler = None,
+                input_feature_selector = None,
+                clusterer = None,
+                cox_regressor = None,
                 significance_alpha = 0.05,
                 only_significant:bool = True,
                 **kwargs):
             super().__init__(*args, **kwargs)
+            maui_kwargs = _DEFAULT_MAUI_KWARGS if maui_kwargs is None else maui_kwargs
+            maui_omics_layer_mappings = _DEFAULT_MAUI_MAPPINGS if maui_omics_layer_mappings is None else maui_omics_layer_mappings
+            scaler = _DEFAULT_SCALER if scaler is None else scaler
+            input_feature_selector = _DEFAULT_INPUT_FEATURE_SELECTOR if input_feature_selector is None else input_feature_selector
+            clusterer = _DEFAULT_CLUSTERER if clusterer is None else clusterer
+            cox_regressor = _DEFAULT_COXREGRESSOR if cox_regressor is None else cox_regressor
             
             self.only_significant = only_significant
             self.maui_kwargs = maui_kwargs
@@ -46,14 +60,35 @@ try:
                 raise ValueError('Only clusterers with separate "fit" and "predict" methods should be used by this class')
             self.clusterer = clusterer
 
+            self.scaler = scaler
+            self.scalers = {}
+            self.input_feature_selector = input_feature_selector
+            self.input_feature_selectors = {}
+            self.cox_regressor = cox_regressor
+
             self.significance_alpha = significance_alpha
 
             self.fitted = False
 
         # Mixin functions
 
-        def fit(self, X: np.array, durations: np.array, events: np.array, *args, **kwargs):
-            z = self.maui_model.fit_transform(self.preprocess_inputs(X)).values
+        def __fit_dict_steps(self, X:dict[str,np.ndarray]) -> None:
+            self.scalers = {k:deepcopy(self.scaler) for k in X}
+            self.input_feature_selectors = {k:deepcopy(self.input_feature_selector) for k in X}
+
+        def fit(self, X:Union[np.ndarray,dict[str,np.ndarray]], durations:np.ndarray, events:np.ndarray, *args, **kwargs):
+            X = preprocess_input_to_dict(X)
+            self.__fit_dict_steps(X)
+            X = {k:self.scalers[k].fit_transform(X[k]) for k in self.scalers}
+            X = {k:self.input_feature_selectors[k].fit_transform(X[k], durations, events) for k in self.input_feature_selectors}
+
+            if X.keys != self.maui_omics_layer_mappings.keys and "all" in self.maui_omics_layer_mappings:
+                self.maui_omics_layer_mappings = {
+                    k: lambda x: pd.DataFrame(x[:,:].T)
+                    for k in X
+                }
+
+            z = self.maui_model.fit_transform(self.__preprocess_inputs(X)).values
             if self.only_significant:
                 cph_p_values = [
                     lifelines.CoxPHFitter()
@@ -80,53 +115,38 @@ try:
                 self.significant_factors = [
                     i for i in range(self.maui_model.n_latent)
                 ]
-            self.cox_ph_model = lifelines.CoxPHFitter().fit(
-                pd.DataFrame(
-                    {
-                        **{i: z[:, i] for i in self.significant_factors},
-                        "durations": durations,
-                        "events": events,
-                    }
-                ),
-                "durations",
-                "events"
-            )
+            # This check was not done by the original Maui authors but was deemed necessary for evaluating their model:
+            try:
+                self.cox_regressor.fit(z[:,self.significant_factors], durations, events)
+            except lifelines.exceptions.ConvergenceError:
+                self.cox_regressor = _DEFAULT_PENALISED_COXREGRESSOR
+                self.cox_regressor.fit(z[:,self.significant_factors], durations, events)
             self.clusterer.fit_predict(z[:,self.significant_factors])
             self.fitted = True
+
+        def integrate(self, X:Union[np.ndarray,dict[str,np.ndarray]], durations:np.ndarray=None, events:np.ndarray=None, *args, **kwargs) -> np.ndarray:
+            self.check_fitted()
+            X = preprocess_input_to_dict(X)
+            scaled_X = {k:self.scalers[k].transform(X[k]) for k in self.scalers}
+            selected_X = {k:self.input_feature_selectors[k].transform(scaled_X[k], durations, events) for k in self.input_feature_selectors}
+            return self.__integrate(selected_X)[:,self.significant_factors]
+
+        def hazard(self,X:Union[np.ndarray,dict[str,np.ndarray]], durations:np.ndarray=None, events:np.ndarray=None, *args, **kwargs) -> np.ndarray:
+            significant_factors = self.integrate(X, durations=durations, events=events, *args, **kwargs)
+            return self.cox_regressor.hazard(significant_factors)
         
-        def predict(self, X: np.array, *args, **kwargs):
-            significant_factors = self.integrate(X)[:,self.significant_factors]
-            clusters = self.clusterer.predict(significant_factors)
-            return clusters
+        def cluster(self, X:Union[np.ndarray,dict[str,np.ndarray]], durations:np.ndarray=None, events:np.ndarray=None, *args, **kwargs) -> np.ndarray:
+            significant_factors = self.integrate(X, durations=durations, events=events, *args, **kwargs)
+            return self.clusterer.predict(significant_factors)
+
+        def __preprocess_inputs(self, X:dict[str,np.ndarray]) -> dict[str,pd.DataFrame]:
+            return {k: self.maui_omics_layer_mappings[k](X[k]) for k in self.maui_omics_layer_mappings}
 
         def __init_maui(self, **maui_kwargs):
             self.maui_model = maui.Maui(**maui_kwargs)
 
-        def preprocess_inputs(self,X):
-            return {k:self.maui_omics_layer_mappings[k](X) for k in self.maui_omics_layer_mappings}
-
-        def __integrate(self,X):
-            return self.maui_model.transform(self.preprocess_inputs(X)).values
-
-        def integrate(self,X):
-            self.check_fitted()
-            return self.__integrate(X)
-
-        def __calculate_hazard(self,X):
-            z = self.__integrate(X)
-            return np.exp(
-                    self.cox_ph_model.predict_log_partial_hazard(
-                    pd.DataFrame(
-                        {
-                            **{i: z[:, i] for i in self.significant_factors},
-                        }
-                    )
-                )
-            )
-
-        def calculate_hazard(self,X):
-            self.check_fitted()
-            return self.__calculate_hazard(X)
+        def __integrate(self,X:dict[str,np.ndarray]):
+            return self.maui_model.transform(self.__preprocess_inputs(X)).values
         
         def check_fitted(self):
             if not self.fitted:
