@@ -10,6 +10,8 @@
 *.tar.gz
 data/**/*
 backups/
+results/
+figures/
 
 # Other libraries
 maui/*
