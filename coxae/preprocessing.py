@@ -1,4 +1,5 @@
 from typing import Union
+import functools
 import pandas as pd
 import numpy as np
 import scipy as sp
@@ -13,10 +14,19 @@ from sklearn.preprocessing import scale
 
 
 def stack_dicts(X:dict[str,np.ndarray]) -> np.ndarray:
-    return np.concatenate([X[k] for k in X], axis=1)
+    return np.concatenate([X[k] for k in sorted(X)], axis=1)
 
 def preprocess_input_to_dict(X:Union[np.ndarray,dict[str,np.ndarray]]) -> dict[str,np.ndarray]:
     return {"all": X} if not isinstance(X, dict) else X
+
+def dict_of_dfs_to_df_list(dfs:dict[str,pd.DataFrame]) -> list[pd.DataFrame]:
+    return [dfs[layer] for layer in sorted(dfs)]
+
+def merge_df_list(dfs:list[pd.DataFrame]) -> pd.DataFrame:
+    return functools.reduce(lambda x,y: x.join(y), dfs[1:], dfs[0])
+
+def merge_dict_of_dfs(dfs:dict[str,pd.DataFrame]) -> pd.DataFrame:
+    return merge_df_list(dict_of_dfs_to_df_list(dfs))
 
 def remove_constant_columns(df):
     columns_to_remove = get_constant_columns(df)

@@ -79,8 +79,8 @@ try:
         def fit(self, X:Union[np.ndarray,dict[str,np.ndarray]], durations:np.ndarray, events:np.ndarray, *args, **kwargs):
             X = preprocess_input_to_dict(X)
             self.__fit_dict_steps(X)
-            X = {k:self.scalers[k].fit_transform(X[k]) for k in self.scalers}
-            X = {k:self.input_feature_selectors[k].fit_transform(X[k], durations, events) for k in self.input_feature_selectors}
+            selected_X = {k:self.input_feature_selectors[k].fit_transform(X[k], durations, events) for k in self.input_feature_selectors}
+            X = {k:self.scalers[k].fit_transform(selected_X[k]) for k in self.scalers}
 
             if X.keys != self.maui_omics_layer_mappings.keys and "all" in self.maui_omics_layer_mappings:
                 self.maui_omics_layer_mappings = {
@@ -123,13 +123,17 @@ try:
                 self.cox_regressor.fit(z[:,self.significant_factors], durations, events)
             self.clusterer.fit_predict(z[:,self.significant_factors])
             self.fitted = True
+    
+        def __preprocess_input_for_maui(self, X: dict[str,np.ndarray], durations:np.ndarray=None, events:np.ndarray=None) -> np.ndarray:
+            selected_X = {k:self.input_feature_selectors[k].transform(X[k], durations, events) for k in self.input_feature_selectors}
+            scaled_X = {k:self.scalers[k].transform(selected_X[k]) for k in self.scalers}
+            return scaled_X
 
         def integrate(self, X:Union[np.ndarray,dict[str,np.ndarray]], durations:np.ndarray=None, events:np.ndarray=None, *args, **kwargs) -> np.ndarray:
             self.check_fitted()
             X = preprocess_input_to_dict(X)
-            scaled_X = {k:self.scalers[k].transform(X[k]) for k in self.scalers}
-            selected_X = {k:self.input_feature_selectors[k].transform(scaled_X[k], durations, events) for k in self.input_feature_selectors}
-            return self.__integrate(selected_X)[:,self.significant_factors]
+            scaled_X = self.__preprocess_input_for_maui(X, durations, events)
+            return self.__integrate(scaled_X)[:,self.significant_factors]
 
         def hazard(self,X:Union[np.ndarray,dict[str,np.ndarray]], durations:np.ndarray=None, events:np.ndarray=None, *args, **kwargs) -> np.ndarray:
             significant_factors = self.integrate(X, durations=durations, events=events, *args, **kwargs)

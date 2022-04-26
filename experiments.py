@@ -32,12 +32,14 @@ def get_results(fold_results, metric, evaluation_set):
 
 def main(
         datasets:list[str] = None,
+        omics:list[str] = None,
         data_directory_template:str = "./data/hierae_data/processed/{dset}/merged",
 
         models:list = None,
         num_reps:int = 4,
         n_splits:int = 10,
 
+        write_folder = ".",
         figure_formats:list[str] = None,
         figsize:tuple[float,float] = (15,7),
 
@@ -45,19 +47,27 @@ def main(
         deactivate_tqdm:bool = False,
         ):
     datasets = datasets if datasets is not None else ['BLCA', 'BRCA', 'COAD', 'ESCA', 'HNSC', 'KIRC', 'KIRP', 'LGG', 'LIHC', 'LUAD', 'LUSC', 'OV', 'PAAD', 'SARC', 'SKCM', 'STAD', 'UCEC']
-    models = models if models is not None else [ConcreteCoxAutoencoderClustering, CoxAutoencoderClustering, MauiClustering, AutoencoderClustering, PCAClustering]
+    omics = omics if omics is not None else ["clin", "cnv", "gex", "meth", "mirna", "mut", "rppa"]
+    models = models if models is not None else [PCAClustering, ConcreteCoxAutoencoderClustering, CoxAutoencoderClustering, MauiClustering, AutoencoderClustering]
     models = [cls if not issubclass(type(cls), str) else globals()[cls] for cls in models]
     figure_formats = figure_formats if figure_formats is not None else ["png", "pdf", "svg"]
     
     if issubclass(type(datasets), str):
-        datasets = [datasets]
+        datasets = datasets.split(",")
+    if issubclass(type(omics), str):
+        omics = omics.split(",")
+        
+    omics = set(omics)
 
     dim_reduction = TSNE
     dim_reduction_label = "TSNE_{}"
 
+    fig_folder = os.path.join(write_folder, "figs")
+    results_folder = os.path.join(write_folder, "results")
+
     for fmt in figure_formats:
-        os.makedirs("./figs/{fmt}/".format(fmt=fmt), exist_ok=True)
-    os.makedirs("./results/".format(fmt=fmt), exist_ok=True)
+        os.makedirs(os.path.join(fig_folder,fmt), exist_ok=True)
+    os.makedirs(results_folder, exist_ok=True)
 
     for dset in tqdm(datasets, desc="dset", disable=deactivate_tqdm):
         tqdm.write(dset)
@@ -78,7 +88,7 @@ def main(
         kmfall_fig = plt.figure(figsize=figsize)
         kmf.plot(show_censors=1, ci_show=1, at_risk_counts=True)
         for fmt in figure_formats:
-            kmfall_fig.savefig("./figs/{fmt}/{dset}_os.{fmt}".format(dset=dset, fmt=fmt))
+            kmfall_fig.savefig(os.path.join(fig_folder, fmt, "{dset}_os.{fmt}".format(dset=dset, fmt=fmt)))
         kmfall_fig = None
 
         df_clin = survival
@@ -99,6 +109,7 @@ def main(
             "mut": df_mutation,
             "rppa": df_rppa
         }
+        features_dfs = {k:feature_dfs[k] for k in feature_dfs if k in omics}
 
         feature_df_list = [feature_dfs[k] for k in feature_dfs]
         df_all = functools.reduce(lambda x,y: x.join(y), feature_df_list[1:], feature_df_list[0])
@@ -113,17 +124,18 @@ def main(
         red2dobs_fig = plt.figure(figsize=figsize)
         sns.scatterplot(data=df_plot, x=dim_reduction_label.format(0), y=dim_reduction_label.format(1), hue="observed")
         for fmt in figure_formats:
-            red2dobs_fig.savefig("./figs/{fmt}/{dset}_2d_observed.{fmt}".format(dset=dset, fmt=fmt))
+            red2dobs_fig.savefig(os.path.join(fig_folder, fmt, "{dset}_2d_observed.{fmt}".format(dset=dset, fmt=fmt)))
         red2dobs_fig = None
 
         red2ddur_fig = plt.figure(figsize=figsize)
         sns.scatterplot(data=df_plot[df_plot["observed"]==1], x=dim_reduction_label.format(0), y=dim_reduction_label.format(1), hue="duration")
         for fmt in figure_formats:
-            red2ddur_fig.savefig("./figs/{fmt}/{dset}_2d_observed_duration.{fmt}".format(dset=dset, fmt=fmt))
+            red2ddur_fig.savefig(os.path.join(fig_folder, fmt, "{dset}_2d_observed_duration.{fmt}".format(dset=dset, fmt=fmt)))
         red2ddur_fig = None
         df_plot
 
         model_fold_results = {
+            "cancer":[],
             "model":[],
             "rep":[],
             "fold":[],
@@ -142,13 +154,26 @@ def main(
                             model = ModelClass(encoding_feature_selector=CoxPHFeatureSelector(limit_significant=limit_significant, get_most_significant_combination_time_limit=0))
                         except (TypeError, ValueError):
                             model = ModelClass()
-                        model.fit({k:X[k][train_index] for k in X}, durations[train_index], events[train_index])
+                        try:
+                            model.fit({k:X[k][train_index] for k in X}, durations[train_index], events[train_index])
+                        except:
+                            continue
                         clusters = model.cluster(X)
                         hazards = model.hazard(X)
                         for partition, indexes in zip(["All", "Train", "Test"], [np.concatenate([train_index, test_index]), train_index, test_index]):
-                            _, p_value = model.logrank_p_score(clusters[indexes], durations[indexes], events[indexes])
-                            c_index = model.concordance_index(hazards[indexes], durations[indexes], events[indexes])
-
+                            try:
+                                _, p_value = model.logrank_p_score(clusters[indexes], durations[indexes], events[indexes])
+                            except KeyboardInterrupt as e:
+                                raise e
+                            except:
+                                p_value = np.nan
+                            try:
+                                c_index = model.concordance_index(hazards[indexes], durations[indexes], events[indexes])
+                            except KeyboardInterrupt as e:
+                                raise e
+                            except:
+                                c_index = np.nan
+                                
                             if not np.isnan(p_value):
                                 partition_fig = plt.figure(figsize=figsize)
                                 ax = plt.gca()
@@ -157,10 +182,11 @@ def main(
                                     kmf.plot(show_censors=1, ci_show=1, ax=ax)
                                 lifelines.plotting.add_at_risk_counts(*kmfs, ax=ax)
                                 plt.title(
-                                    """{model} Fold-{fold}, {partition}-dataset
+                                    """{model} {cancer} Fold-{fold}, {partition}-dataset
                                     logrank-p: {p_value:.6e}
                                     concordance-index: {c_index:.6f}""".format(
                                         model=ModelClass.__name__,
+                                        cancer=dset,
                                         fold=fold,
                                         partition=partition,
                                         p_value=p_value,
@@ -168,21 +194,22 @@ def main(
                                     )
                                 )
                                 for fmt in figure_formats:
-                                    partition_fig.savefig("./figs/{fmt}/{dset}_sep_{model}_{partition}_{rep}_{fold}.{fmt}".format(dset=dset, model = ModelClass.__name__, partition=partition, rep=rep, fold=fold, fmt=fmt))
+                                    partition_fig.savefig(os.path.join(fig_folder, fmt, "{dset}_sep_{model}_{partition}_{rep}_{fold}.{fmt}".format(dset=dset, model = ModelClass.__name__, partition=partition, rep=rep, fold=fold, fmt=fmt)))
                                 partition_fig = None
 
+                            model_fold_results["cancer"].append(dset)
                             model_fold_results["model"].append(ModelClass.__name__)
                             model_fold_results["rep"].append(rep)
                             model_fold_results["fold"].append(fold)
                             model_fold_results["partition"].append(partition)
                             model_fold_results["p_value"].append(p_value)
                             model_fold_results["c_index"].append(c_index)
-                            pd.DataFrame(model_fold_results).to_csv("./results/{dset}.csv".format(dset=dset))
+                            pd.DataFrame(model_fold_results).to_csv(os.path.join(results_folder,"{dset}.csv".format(dset=dset)))
         except KeyboardInterrupt:
-            pd.DataFrame(model_fold_results).to_csv("./results/{dset}.csv".format(dset=dset))
+            pd.DataFrame(model_fold_results).to_csv(os.path.join(results_folder,"{dset}.csv".format(dset=dset)))
             return
         result_df = pd.DataFrame(model_fold_results)
-        result_df.to_csv("./results/{dset}.csv".format(dset=dset))
+        result_df.to_csv(os.path.join(results_folder,"{dset}.csv".format(dset=dset)))
         for partition in ["All", "Train", "Test"]:
             for metric in ["c_index", "p_value"]:
                 results_fig, ax = plt.subplots(figsize=figsize)
@@ -190,7 +217,7 @@ def main(
                 if metric=="c_index":
                     ax.set_ylim(0, 1)
                 for fmt in figure_formats:
-                    results_fig.savefig("./figs/{fmt}/{dset}_comparison_{metric}_{partition}.{fmt}".format(dset=dset, metric=metric, partition=partition, fmt=fmt))
+                    results_fig.savefig(os.path.join(fig_folder, fmt, "{dset}_comparison_{metric}_{partition}.{fmt}".format(dset=dset, metric=metric, partition=partition, fmt=fmt)))
                 results_fig = None
 
 if __name__ == "__main__":

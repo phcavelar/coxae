@@ -82,9 +82,9 @@ class AutoencoderClustering(SurvivalClustererMixin,HazardRegressorMixin):
     def fit(self, X: Union[np.ndarray,dict[str,np.ndarray]], durations: np.ndarray, events: np.ndarray, *args, ae_opt_kwargs=None, ae_train_opts=None, **kwargs):
         X = preprocess_input_to_dict(X)
         self.__fit_dict_steps(X)
-        X = {k:self.scalers[k].fit_transform(X[k]) for k in self.scalers}
-        X = {k:self.input_feature_selectors[k].fit_transform(X[k], durations, events) for k in self.input_feature_selectors}
-        X = stack_dicts(X)
+        selected_X = {k:self.input_feature_selectors[k].fit_transform(X[k], durations, events) for k in self.input_feature_selectors}
+        scaled_X = {k:self.scalers[k].fit_transform(selected_X[k]) for k in self.scalers}
+        X = stack_dicts(scaled_X)
         
         if not self.ae_initialised:
             self.__init_ae(X.shape[-1], **self.ae_kwargs)
@@ -100,13 +100,17 @@ class AutoencoderClustering(SurvivalClustererMixin,HazardRegressorMixin):
         self.clusterer.fit(significant_factors)
         self.fitted = True
         return self
+    
+    def __preprocess_input_for_ae(self, X: dict[str,np.ndarray], durations:np.ndarray=None, events:np.ndarray=None) -> np.ndarray:
+        selected_X = {k:self.input_feature_selectors[k].transform(X[k], durations, events) for k in self.input_feature_selectors}
+        scaled_X = {k:self.scalers[k].transform(selected_X[k]) for k in self.scalers}
+        stacked_X = stack_dicts(scaled_X)
+        return stacked_X
 
     def integrate(self, X:Union[np.ndarray,dict[str,np.ndarray]], durations:np.ndarray=None, events:np.ndarray=None, *args, **kwargs) -> np.ndarray:
         self.check_fitted()
         X = preprocess_input_to_dict(X)
-        scaled_X = {k:self.scalers[k].transform(X[k]) for k in self.scalers}
-        selected_X = {k:self.input_feature_selectors[k].transform(scaled_X[k], durations, events) for k in self.input_feature_selectors}
-        stacked_X = stack_dicts(selected_X)
+        stacked_X = self.__preprocess_input_for_ae(X, durations, events)
         integrated_values = self.__integrate(stacked_X)
         significant_factors = self.encoding_feature_selector.transform(integrated_values)
         return significant_factors

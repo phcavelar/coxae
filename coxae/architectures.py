@@ -159,6 +159,10 @@ class ConcreteAutoencoder(nn.Module):
         with torch.no_grad():
             feature_importance_matrix = self.encoder.get_alphas()
         return feature_importance_matrix.detach().cpu().numpy()
+
+    def get_selected_feature_indexes(self):
+        with torch.no_grad():
+            return torch.argmax(self.encoder.logits, dim=0).detach().cpu().numpy()
     
     def update_temperature(self):
         self.encoder.update_temperature()
@@ -203,11 +207,7 @@ class CoxAutoencoder(nn.Module):
         return encoder_activations + decoder_activations
     
     def get_feature_importance_matrix(self):
-        with torch.no_grad():
-            feature_importance_matrix = self.encoder.layers[0].weight.T
-            for layer in self.encoder.layers[1:]:
-                feature_importance_matrix = torch.matmul(feature_importance_matrix, layer.weight.T)
-        return feature_importance_matrix.detach().cpu().numpy()
+        return self.ae.get_feature_importance_matrix()
 
 class ConcreteCoxAutoencoder(nn.Module):
     def __init__(
@@ -252,11 +252,10 @@ class ConcreteCoxAutoencoder(nn.Module):
         return encoder_activations + decoder_activations
     
     def get_feature_importance_matrix(self):
-        with torch.no_grad():
-            feature_importance_matrix = self.encoder.layers[0].weight.T
-            for layer in self.encoder.layers[1:]:
-                feature_importance_matrix = torch.matmul(feature_importance_matrix, layer.weight.T)
-        return feature_importance_matrix.detach().cpu().numpy()
+        return self.ae.get_feature_importance_matrix()
+
+    def get_selected_feature_indexes(self):
+        return self.ae.get_selected_feature_indexes()
 
     def update_temperature(self):
         self.ae.update_temperature()
