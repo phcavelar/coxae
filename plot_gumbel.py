@@ -2,7 +2,7 @@ import numpy as np
 from scipy.stats import gumbel_r
 import matplotlib.pyplot as plt
 import seaborn as sns
-sns.set_style()
+sns.set_theme(palette="colorblind", font_scale=1.5)
 
 x = np.linspace(
     gumbel_r.ppf(0.001),
