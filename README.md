@@ -14,7 +14,8 @@ Cancer is a complex disease with significant social and economic impact. Advance
 ## Set-up
 
 To set up some of the baselines, you might need to download the following github repositories, and either install or unpack their respective library folders in the root of this repository:
-* https://github.com/phcavelar/maui
+* Maui: https://github.com/phcavelar/maui
+* HierAE: https://github.com/phcavelar/hierae
 
 I've used a personal fork to ensure that you can use the same modifications I used. If you use any of the baselines in your work, please cite their respective papers.
 
