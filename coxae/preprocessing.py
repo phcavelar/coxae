@@ -16,6 +16,15 @@ from sklearn.preprocessing import scale
 def stack_dicts(X:dict[str,np.ndarray]) -> np.ndarray:
     return np.concatenate([X[k] for k in sorted(X)], axis=1)
 
+def stack_dicts_indexes(X:dict[str,np.ndarray]) -> np.ndarray:
+    lens = [len(X[k]) for k in sorted(X)]
+    indexes = []
+    i = 0
+    for l in lens:
+        indexes.append(list(range(i,i+l)))
+        i += l
+    return indexes
+
 def preprocess_input_to_dict(X:Union[np.ndarray,dict[str,np.ndarray]]) -> dict[str,np.ndarray]:
     return {"all": X} if not isinstance(X, dict) else X
 

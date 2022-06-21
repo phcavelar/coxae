@@ -16,6 +16,7 @@ figures/
 # Other libraries
 maui/*
 simdeep/*
+hierae/*
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

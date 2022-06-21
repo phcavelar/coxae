@@ -1,5 +1,6 @@
 import math
 
+import torch.nn as nn
 import torch.nn.functional as F
 
 from sklearn.decomposition import PCA
@@ -16,11 +17,13 @@ __DEFAULT_NUM_EPOCHS = 256
 __DEFAULT_START_TEMP = 10.0
 __DEFAULT_MIN_TEMP = 0.01
 __DEFAULT_CONCRETE_ALPHA_DECAY = calculate_concrete_alpha_decay(__DEFAULT_START_TEMP, __DEFAULT_MIN_TEMP, __DEFAULT_NUM_EPOCHS)
+_DEFAULT_NONLINEARITY = F.relu
+_DEFAULT_NONLINEARITY_CLASS = nn.ReLU
 
 _DEFAULT_AE_KWARGS = {
     "hidden_dims": [512],
     "encoding_dim": __DEFAULT_ENCODING_DIMENSIONALITY,
-    "nonlinearity": F.relu,
+    "nonlinearity": _DEFAULT_NONLINEARITY,
     "final_nonlinearity": lambda x:x,
     "dropout_rate": 0.3,
     "bias": True,
