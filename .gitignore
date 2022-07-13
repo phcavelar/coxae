@@ -12,8 +12,8 @@ data/**/*
 backups/
 results/
 figures/
-./*.pdf
-./*.png
+/*.pdf
+/*.png
 
 # Other libraries
 maui/*
