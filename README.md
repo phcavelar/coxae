@@ -26,7 +26,7 @@ If you use this code please cite the following papers:
 
 ## Dependencies
 
-This repository shuold be run with python>=3.9
+This repository should be run with python>=3.9
 
 ```
 mamba create -n lusc -c conda-forge -c pytorch -c bioconda "python>=3.9" pypgatk pytorch torchvision torchaudio cpuonly lifelines statsmodels pandas scikit-learn seaborn fire biopython scipy tqdm ipykernel ipywidgets
