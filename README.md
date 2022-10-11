@@ -29,10 +29,15 @@ If you use this code please cite the following papers:
 This repository should be run with python>=3.9
 
 ```
-mamba create -n lusc -c conda-forge -c pytorch -c bioconda "python>=3.9" pypgatk pytorch torchvision torchaudio cpuonly lifelines statsmodels pandas scikit-learn seaborn fire biopython scipy tqdm ipykernel ipywidgets
+mamba create -n lusc -c conda-forge -c pytorch -c bioconda "python>=3.9" pypgatk pytorch torchvision torchaudio cpuonly pycox lifelines statsmodels pandas scikit-learn seaborn fire biopython scipy tqdm ipykernel ipywidgets
 conda activate lusc
 python -m ipykernel install --user --name=lusc
 conda deactivate
 jupyter notebook
 ```
 
+To create the environment with the exact tested version for this repository run the following:
+
+```
+mamba create -n lusc -c conda-forge -c pytorch -c bioconda "python=3.9.7" "pypgatk=0.0.19" "pytorch=1.10.0" "torchvision=0.10.1" "torchaudio=0.10.0" "cpuonly=2.0" "pycox=0.2.3" "lifelines=0.26.3" "statsmodels=0.13.1" "pandas=1.3.4" "scikit-learn=" "seaborn=0.11.2" "fire=0.4.0" "biopython=1.79" "scipy=1.7.2" "tqdm=4.62.3" "ipykernel=6.5.0" "ipywidgets=7.6.5"
+```
